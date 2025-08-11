@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Rad Angle" />
+  <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAABccqhmAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAByZJREFUeNrs3TGR2zYQBVCP//+bA0bQK2x+1m1lYzKqvHnB1S0Q1m9m0vW9F5E1Gv3m8b3wq8s2r79wWgAAEBy3dVtVbVYqFovl8vlEolkslk0tPTU1NTk8lkMmZmZrHdbldXV5fP58cHBwWFhYbIsC2Ww2m82srKxSqVS6urrq9Xr9bDZb3G63bW1tVquVx+Px8fHx4eHh2Ww2q9Vq5XK5ZDKZfD4fAAAgPz7m8vGwsLCwsLCwq5fLZbfb7fb6+rqenp6cHBw0NHRsCwLAAAAgKt9U3yqXq/X4/H4vHx8vLy8bIsC0aj0Wg0eXl5bW1t9fX1nJyc5OTkYDAYrFar3W53fX19e3t7EokEAAAAP8n7xgAAABg6C5nAgAAAGDoLmcCAAAAYOgudwIABN8mE0xF8g8B7V3b2b8I2l7AAAAAElFTkSuQmCC" />
+  <link id="pwa-manifest" rel="manifest" />
+  <title>Radiograph Angle Tool — Fullscreen Mobile</title>
+  <style>
+    :root { --bg:#0b1020; --panel:#111833; --ink:#e9eefb; --muted:#9fb3ff; --accent:#6aa7ff; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: #0a0f1e; color: var(--ink); font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    body { min-height: 100dvh; }
+    .app { position: fixed; inset: 0; display: flex; flex-direction: column; background: #000; }
+    /* Canvas area takes 100% height */
+    #canvasWrap { position: relative; flex: 1 1 auto; height: 100%; background: #000; touch-action: none; }
+    canvas, video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    video { display: none; background: #000; }
+
+    /* Floating top bar */
+    .topbar { position: absolute; top: env(safe-area-inset-top); left: 0; right: 0;
+      display: flex; gap: 8px; align-items: center; justify-content: space-between;
+      padding: 8px 12px; z-index: 10; pointer-events: none; }
+    .brand { pointer-events: auto; font-weight: 700; font-size: 14px; padding: 6px 10px; border-radius: 10px;
+      background: rgba(17,24,51,.7); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.12); }
+    .btnrow { display: flex; gap: 8px; pointer-events: auto; }
+    .btn { background: rgba(17,24,51,.85); backdrop-filter: blur(6px); color: var(--ink);
+      border: 1px solid rgba(255,255,255,.15); border-radius: 12px; padding: 8px 12px; font-size: 13px; }
+    .btn:disabled { opacity: .45; }
+    .chip { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,.08); color: #c9d6ff; }
+
+    /* Floating bottom toolbar */
+    .bottombar { position: absolute; left: 0; right: 0; bottom: calc(8px + env(safe-area-inset-bottom));
+      display: flex; gap: 8px; align-items: center; justify-content: center; padding: 8px; z-index: 10; }
+    .dock { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 8px; width: min(900px, 96%); }
+    .dock .btn, .dock select { width: 100%; height: 44px; }
+    select { background: rgba(17,24,51,.85); color: var(--ink); border: 1px solid rgba(255,255,255,.15); border-radius: 12px; padding: 8px 10px; font-size: 13px; }
+
+    /* Slide-out panel */
+    .panel { position: absolute; right: 8px; top: calc(52px + env(safe-area-inset-top)); bottom: calc(64px + env(safe-area-inset-bottom));
+      width: min(360px, 88%); background: rgba(17,24,51,.92); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,.14); border-radius: 14px; overflow: auto; z-index: 9; padding: 12px; display: none; }
+    .panel h3 { margin: 6px 0 8px; font-size: 13px; color: var(--muted); }
+    .panel .list { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.35; }
+
+    /* Minimal grid overlay */
+    .grid { pointer-events: none; position: absolute; inset: 0; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div id="canvasWrap">
+      <video id="video" playsinline></video>
+      <canvas id="canvas" tabindex="0" aria-label="radiograph canvas"></canvas>
+
+      <div class="topbar">
+        <div class="brand">Rad Angle <span id="modeBadge" class="chip">HVA</span></div>
+        <div class="btnrow">
+          <button id="togglePanel" class="btn">Info</button>
+        </div>
+      </div>
+
+      <div class="bottombar">
+        <div class="dock">
+          <button id="startCam" class="btn">Camera</button>
+          <button id="switchCam" class="btn" disabled>Flip</button>
+          <button id="snap" class="btn" disabled>Capture</button>
+          <select id="mode">
+            <option value="HVA">HVA</option>
+            <option value="IMA">IMA</option>
+            <option value="CALC_INC">Calc Incl</option>
+            <option value="LINE_LINE">Line–Line</option>
+          </select>
+          <button id="exportPNG" class="btn">Export</button>
+        </div>
+      </div>
+
+      <aside id="panel" class="panel">
+        <h3>Instructions</h3>
+        <div id="instructions" class="list"></div>
+        <h3>Measurements</h3>
+        <div id="measurements" class="list">None yet.</div>
+        <h3>Actions</h3>
+        <div class="btnrow" style="flex-wrap:wrap;gap:6px">
+          <button id="undo" class="btn">Undo</button>
+          <button id="clearAll" class="btn">Clear</button>
+          <select id="baseline">
+            <option value="HORIZ">Baseline: Horizontal</option>
+            <option value="CUSTOM">Baseline: Custom</option>
+          </select>
+          <button id="resetView" class="btn">Reset View</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    // ---------- Utilities ----------
+    const $ = (id) => document.getElementById(id);
+    const canvas = $("canvas");
+    const ctx = canvas.getContext("2d");
+    const video = $("video");
+    const dpr = window.devicePixelRatio || 1;
+
+    const state = {
+      img: null,
+      imgNaturalW: 0, imgNaturalH: 0,
+      scale: 1, minScale: 0.1, maxScale: 12,
+      offsetX: 0, offsetY: 0,
+      isPanning: false,
+      startPan: {x:0,y:0},
+      currentMode: 'HVA',
+      baselineMode: 'HORIZ',
+      currentPts: [],
+      baselinePts: [],
+      measurements: [],
+      colorIdx: 0,
+      // camera
+      stream: null,
+      usingCamera: false,
+      currentFacing: 'environment',
+      // touch
+      pointers: new Map(),
+      lastPinchDist: null,
+    };
+
+    function resizeCanvas(){
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      draw();
+    }
+    new ResizeObserver(resizeCanvas).observe($("canvasWrap"));
+
+    // ---------- Image handling ----------
+    function loadImageFromBlob(blob){
+      const img = new Image();
+      img.onload = ()=>{
+        stopCamera();
+        state.img = img; state.imgNaturalW = img.naturalWidth; state.imgNaturalH = img.naturalHeight;
+        fitImage(); state.measurements = []; state.currentPts = []; state.baselinePts = []; state.colorIdx = 0;
+        renderMeasurementsList(); draw();
+      };
+      img.src = URL.createObjectURL(blob);
+    }
+
+    // ---------- Camera ----------
+    async function startCamera(){
+      try{
+        const constraints = { video: { facingMode: state.currentFacing, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        state.stream = stream; state.usingCamera = true;
+        video.srcObject = stream; await video.play();
+        video.style.display = 'block';
+        $("snap").disabled = false; $("switchCam").disabled = false;
+        $("startCam").disabled = true;
+      } catch(err){ alert('Camera access failed: ' + err.message); }
+    }
+    function stopCamera(){
+      if(state.stream){ state.stream.getTracks().forEach(t=>t.stop()); state.stream = null; }
+      state.usingCamera = false; video.srcObject = null; video.style.display = 'none';
+      $("snap").disabled = true; $("switchCam").disabled = true; $("startCam").disabled = false;
+    }
+    async function switchCamera(){ state.currentFacing = state.currentFacing === 'environment' ? 'user' : 'environment'; if(state.usingCamera){ stopCamera(); await startCamera(); } }
+    async function captureFrame(){
+      if(!state.usingCamera) return;
+      const off = document.createElement('canvas'); const vw = video.videoWidth || 1280; const vh = video.videoHeight || 720;
+      off.width = vw; off.height = vh; const c2 = off.getContext('2d'); c2.drawImage(video,0,0,vw,vh);
+      off.toBlob((blob)=>{ if(blob) loadImageFromBlob(blob); }, 'image/jpeg', 0.95);
+    }
+
+    $("startCam").onclick = startCamera;
+    $("switchCam").onclick = switchCamera;
+    $("snap").onclick = captureFrame;
+
+    // ---------- View ----------
+    function fitImage(){
+      const cw = canvas.width, ch = canvas.height;
+      const sx = cw / state.imgNaturalW, sy = ch / state.imgNaturalH;
+      state.scale = Math.min(sx, sy) * 0.995; // use nearly full screen
+      state.offsetX = (cw - state.imgNaturalW * state.scale) / 2;
+      state.offsetY = (ch - state.imgNaturalH * state.scale) / 2;
+      state.minScale = Math.min(0.05, state.scale * 0.25);
+      state.maxScale = Math.max(12, state.scale * 6);
+    }
+
+    // ---------- Modes ----------
+    const MODE_STEPS = {
+      HVA: { steps: ['2 pts along FIRST met (prox→dist).','2 pts along PROX PHALANX (prox→dist).'], needs: 4, build: (pts, color)=>({ type:'HVA', color, lines:[[pts[0],pts[1]],[pts[2],pts[3]]] }) },
+      IMA: { steps: ['2 pts along FIRST met (prox→dist).','2 pts along SECOND met (prox→dist).'], needs: 4, build: (pts, color)=>({ type:'IMA', color, lines:[[pts[0],pts[1]],[pts[2],pts[3]]] }) },
+      CALC_INC: { steps: ['2 pts along calcaneal inferior border (post→ant).','If Custom baseline, add 2 baseline pts.'], needs: 2, build: (pts, color)=>({ type:'CALC_INC', color, lines:[[pts[0],pts[1]]] }) },
+      LINE_LINE: { steps: ['2 pts for Line A.','2 pts for Line B.'], needs: 4, build: (pts, color)=>({ type:'LINE_LINE', color, lines:[[pts[0],pts[1]],[pts[2],pts[3]]] }) }
+    };
+    function setMode(m){ state.currentMode = m; state.currentPts = []; $("modeBadge").textContent = m; renderInstructions(); draw(); }
+    $("mode").addEventListener('change', (e)=> setMode(e.target.value));
+    function setBaselineMode(m){ state.baselineMode = m; if(m==='HORIZ') state.baselinePts=[]; renderInstructions(); draw(); }
+    $("baseline").addEventListener('change', (e)=> setBaselineMode(e.target.value));
+
+    function renderInstructions(){
+      const ms = MODE_STEPS[state.currentMode];
+      const lines = [];
+      ms.steps.forEach((s,i)=> lines.push(`${i+1}. ${s}`));
+      if(state.currentMode==='CALC_INC'){
+        if(state.baselineMode==='HORIZ'){ lines.push('Baseline: image horizontal.'); }
+        else { lines.push('Baseline: place 2 custom baseline pts (hold ⌥ on desktop).'); }
+      }
+      $("instructions").innerHTML = lines.map(l=>`<div>• ${l}</div>`).join('');
+    }
+    renderInstructions();
+
+    // ---------- Interaction ----------
+    const COLORS = ['#6aa7ff','#80ffd3','#ffd868','#ff8db3','#a18bff','#8ef0ff','#ffad74'];
+    function nextColor(){ const c = COLORS[state.colorIdx % COLORS.length]; state.colorIdx++; return c; }
+
+    let lastTap = 0;
+    function screenToImage(x,y){ const cx = (x * dpr - state.offsetX)/state.scale; const cy = (y * dpr - state.offsetY)/state.scale; return {x:cx,y:cy}; }
+    function imageToScreen(x,y){ const sx = (x * state.scale + state.offsetX)/dpr; const sy = (y * state.scale + state.offsetY)/dpr; return {x:sx,y:sy}; }
+
+    function onPointerDown(e){
+      canvas.setPointerCapture(e.pointerId);
+      state.pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(state.pointers.size === 2){
+        const [a,b] = Array.from(state.pointers.values()); state.lastPinchDist = Math.hypot(a.x-b.x, a.y-b.y); return;
+      }
+      if(!state.img){ state.isPanning = true; state.startPan={x:e.clientX,y:e.clientY}; return; }
+      const now = Date.now();
+      if(now - lastTap < 300){ fitImage(); lastTap = 0; return; }
+      lastTap = now;
+      const rect = canvas.getBoundingClientRect();
+      const pt = screenToImage(e.clientX - rect.left, e.clientY - rect.top);
+
+      if(state.currentMode==='CALC_INC' && state.baselineMode==='CUSTOM' && state.baselinePts.length<2 && e.altKey){
+        state.baselinePts.push(pt); draw(); return;
+      }
+
+      state.currentPts.push(pt);
+      const needs = MODE_STEPS[state.currentMode].needs;
+      if(state.currentPts.length === needs){
+        const color = nextColor();
+        const measurement = MODE_STEPS[state.currentMode].build(state.currentPts.slice(), color);
+        if(state.currentMode==='CALC_INC' && state.baselineMode==='CUSTOM' && state.baselinePts.length===2){
+          measurement.baseline = [ state.baselinePts[0], state.baselinePts[1] ];
+        }
+        computeMeasurement(measurement);
+        state.measurements.push(measurement);
+        state.currentPts = [];
+        renderMeasurementsList();
+      }
+      draw();
+    }
+
+    function onPointerMove(e){
+      if(state.pointers.has(e.pointerId)){ state.pointers.set(e.pointerId, {x:e.clientX, y:e.clientY}); }
+      if(state.pointers.size === 2){
+        const [a,b] = Array.from(state.pointers.values());
+        const dist = Math.hypot(a.x-b.x, a.y-b.y);
+        if(state.lastPinchDist){
+          const zoom = dist / state.lastPinchDist;
+          const rect = canvas.getBoundingClientRect();
+          const mx = ((a.x+b.x)/2 - rect.left) * dpr; const my = ((a.y+b.y)/2 - rect.top) * dpr;
+          const newScale = Math.min(state.maxScale, Math.max(state.minScale, state.scale * zoom));
+          const k = newScale / state.scale;
+          state.offsetX = mx - (mx - state.offsetX) * k;
+          state.offsetY = my - (my - state.offsetY) * k;
+          state.scale = newScale;
+          draw();
+        }
+        state.lastPinchDist = dist; return;
+      }
+      if(state.isPanning){
+        const dx = (e.clientX - state.startPan.x) * dpr;
+        const dy = (e.clientY - state.startPan.y) * dpr;
+        state.offsetX += dx; state.offsetY += dy; state.startPan = {x:e.clientX, y:e.clientY}; draw();
+      }
+    }
+    function onPointerUp(e){ canvas.releasePointerCapture(e.pointerId); state.pointers.delete(e.pointerId); if(state.pointers.size<2){ state.lastPinchDist = null; } state.isPanning = false; }
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+
+    // ---------- Math ----------
+    function angleBetween(p1, p2, p3, p4){
+      const vx = p2.x - p1.x, vy = p2.y - p1.y; const wx = p4.x - p3.x, wy = p4.y - p3.y;
+      const vlen = Math.hypot(vx,vy), wlen = Math.hypot(wx,wy); if(vlen===0||wlen===0) return NaN;
+      let cos = (vx*wx + vy*wy) / (vlen*wlen); cos = Math.min(1, Math.max(-1, cos));
+      let ang = Math.acos(cos) * 180/Math.PI; if(ang > 180) ang = 360 - ang; if(ang > 90) ang = 180 - ang; return ang;
+    }
+    function angleToHorizontal(p1, p2){ const dx = p2.x - p1.x, dy = p2.y - p1.y; return Math.abs(Math.atan2(dy, dx) * 180/Math.PI); }
+    function lineMidpoint(a,b){ return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }; }
+    function lineIntersection(a,b,c,d){ const A1 = b.y - a.y; const B1 = a.x - b.x; const C1 = A1*a.x + B1*a.y; const A2 = d.y - c.y; const B2 = c.x - d.x; const C2 = A2*c.x + B2*c.y; const det = A1*B2 - A2*B1; if(Math.abs(det) < 1e-6){ const m1 = lineMidpoint(a,b), m2 = lineMidpoint(c,d); return { x:(m1.x+m2.x)/2, y:(m1.y+m2.x)/2 }; } const x = (B2*C1 - B1*C2)/det; const y = (A1*C2 - A2*C1)/det; return {x,y}; }
+
+    function computeMeasurement(m){
+      if(m.type==='HVA' || m.type==='IMA' || m.type==='LINE_LINE'){
+        const [l1,l2] = m.lines; m.angle = angleBetween(l1[0], l1[1], l2[0], l2[1]); m.label = `${m.type}: ${m.angle.toFixed(1)}°`; m.anchor = lineIntersection(l1[0], l1[1], l2[0], l2[1]);
+      } else if(m.type==='CALC_INC'){
+        const calc = m.lines[0];
+        if(state.baselineMode==='HORIZ' && !m.baseline){ const a = angleToHorizontal(calc[0], calc[1]); m.angle = a <= 90 ? a : 180 - a; m.label = `Calc Inclination: ${m.angle.toFixed(1)}° (to horiz)`; m.anchor = lineMidpoint(calc[0], calc[1]); }
+        else { const base = m.baseline; m.angle = angleBetween(calc[0], calc[1], base[0], base[1]); m.label = `Calc Inclination: ${m.angle.toFixed(1)}° (to baseline)`; m.anchor = lineIntersection(calc[0], calc[1], base[0], base[1]); }
+      }
+    }
+
+    function renderMeasurementsList(){
+      const box = $("measurements"); if(state.measurements.length===0){ box.textContent = 'None yet.'; return; }
+      box.innerHTML = state.measurements.map((m)=>`<div style="margin:6px 0;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${m.color};margin-right:6px;"></span><strong>${m.label}</strong></div>`).join('');
+    }
+
+    // ---------- Drawing ----------
+    function draw(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if(state.img){
+        ctx.save(); ctx.imageSmoothingEnabled = true;
+        ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
+        ctx.drawImage(state.img, 0, 0);
+        ctx.restore();
+        drawOverlay(ctx, state.scale, state.offsetX, state.offsetY, false);
+      }
+    }
+    function drawOverlay(c, scale, ox, oy, inImageSpace){
+      function S(p){ return inImageSpace ? p : { x:(p.x*scale+ox), y:(p.y*scale+oy) }; }
+      function drawPoint(p, color){ const s=S(p); c.save(); c.fillStyle='rgba(0,0,0,0.85)'; c.beginPath(); c.arc(s.x, s.y, 6*dpr, 0, Math.PI*2); c.fill(); c.fillStyle=color; c.beginPath(); c.arc(s.x, s.y, 4*dpr, 0, Math.PI*2); c.fill(); c.restore(); }
+      function drawLine(a,b,color){ const s1=S(a), s2=S(b); c.save(); c.strokeStyle=color; c.lineWidth=2*dpr; c.beginPath(); c.moveTo(s1.x,s1.y); c.lineTo(s2.x,s2.y); c.stroke(); c.restore(); }
+      function drawLabel(text, p, color){ const s=S(p); c.save(); c.font=`${12*dpr}px ui-sans-serif, system-ui`; const pad=4*dpr; const w=c.measureText(text).width+pad*2, h=18*dpr; c.fillStyle='rgba(0,0,0,0.65)'; c.fillRect(s.x-w/2, s.y-h/2, w, h); c.strokeStyle='rgba(255,255,255,0.3)'; c.strokeRect(s.x-w/2, s.y-h/2, w, h); c.fillStyle=color; c.fillText(text, s.x-w/2+pad, s.y+4*dpr-h/2); c.restore(); }
+      for(const m of state.measurements){ const color=m.color; if(m.type==='CALC_INC'&&m.baseline){ drawLine(m.baseline[0], m.baseline[1], 'rgba(255,255,255,0.35)'); } for(const ln of m.lines){ drawLine(ln[0], ln[1], color); drawPoint(ln[0], color); drawPoint(ln[1], color); } if(m.anchor && m.label){ drawLabel(m.label, m.anchor, color); } }
+      const cur = ['#6aa7ff','#80ffd3','#ffd868','#ff8db3','#a18bff','#8ef0ff','#ffad74'][state.colorIdx % 7];
+      for(let i=0;i<state.currentPts.length;i++){ const p=state.currentPts[i]; if(i>0) drawLine(state.currentPts[i-1], p, cur); drawPoint(p, cur); }
+      if(state.currentMode==='CALC_INC' && state.baselineMode==='CUSTOM'){ const b = state.baselinePts; if(b.length>0){ drawPoint(b[0], '#ffffff'); } if(b.length>1){ drawPoint(b[1], '#ffffff'); drawLine(b[0], b[1], 'rgba(255,255,255,0.6)'); } }
+    }
+
+    // ---------- Controls ----------
+    $("togglePanel").onclick = ()=>{ const p = $("panel"); p.style.display = (p.style.display==='block') ? 'none' : 'block'; };
+
+    $("undo").onclick = ()=>{ if(state.currentPts.length>0){ state.currentPts.pop(); draw(); return; } if(state.measurements.length>0){ state.measurements.pop(); renderMeasurementsList(); draw(); } };
+    $("clearAll").onclick = ()=>{ state.currentPts=[]; state.measurements=[]; state.baselinePts=[]; state.colorIdx=0; renderMeasurementsList(); draw(); };
+    $("resetView").onclick = ()=>{ if(state.img){ fitImage(); } draw(); };
+    $("exportPNG").onclick = ()=>{
+      if(!state.img) return;
+      const out = document.createElement('canvas'); out.width=state.imgNaturalW; out.height=state.imgNaturalH; const c2=out.getContext('2d');
+      c2.drawImage(state.img,0,0); drawOverlay(c2,1,0,0,true);
+      const link=document.createElement('a'); link.download='annotated_radiograph.png'; link.href=out.toDataURL('image/png'); link.click();
+    };
+
+    // Keyboard shortcuts (desktop)
+    window.addEventListener('keydown', (e)=>{ if(e.key==='d'||e.key==='D') $("undo").click(); if(e.key==='r'||e.key==='R') $("resetView").click(); });
+
+    // Initialize
+    resizeCanvas();
+
+    // ---- PWA bootstrapping ----
+    (function setupPWA(){
+      const manifest = {
+        name: "Radiograph Angle Tool",
+        short_name: "Rad Angle",
+        start_url: "./",
+        scope: "./",
+        display: "standalone",
+        orientation: "portrait",
+        background_color: "#0b1020",
+        theme_color: "#0b1020",
+        icons: [{ src: document.querySelector('link[rel=\"apple-touch-icon\"]').href, sizes: "512x512", type: "image/png" }]
+      };
+      const blob = new Blob([JSON.stringify(manifest)], {type:'application/manifest+json'});
+      const url = URL.createObjectURL(blob);
+      const link = document.getElementById('pwa-manifest'); if(link) link.href = url;
+
+      if('serviceWorker' in navigator){
+        const sw = `const CACHE='rt-mobile-v3';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll([location.pathname])))});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))))});
+self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)))})`;
+        const swBlob = new Blob([sw], {type:'text/javascript'});
+        const swURL = URL.createObjectURL(swBlob);
+        navigator.serviceWorker.register(swURL).catch(()=>{});
+      }
+    })();
+  </script>
+</body>
+</html>
